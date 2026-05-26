@@ -1,0 +1,54 @@
+{
+  "name": "logviewer",
+  "version": "1.0.0",
+  "description": "LogViewer — Desktop application for viewing and filtering logcat logs",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.logviewer.app",
+    "productName": "LogViewer",
+    "mac": {
+      "target": "dmg",
+      "category": "public.app.developer-tools",
+      "icon": "icon",
+      "fileAssociations": [
+        {
+          "ext": ["log", "txt", "logcat", "out", "csv"],
+          "name": "Log File",
+          "role": "Viewer"
+        }
+      ]
+    },
+    "dmg": {
+      "title": "LogViewer",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "!renderer/**/*.map"
+    ],
+    "extraResources": [],
+    "asar": true
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "author": "LogViewer",
+  "license": "MIT"
+}

@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LogCat Viewer</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg-app: #0d1117;
+  --bg-sidebar: #161b22;
+  --bg-header: #161b22;
+  --bg-input: #21262d;
+  --bg-hover: #21262d;
+  --bg-log-even: #0d1117;
+  --bg-log-odd: #161b2240;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #484f58;
+  --accent: #58a6ff;
+  --level-V: #6e7681;
+  --level-D: #58a6ff;
+  --level-I: #3fb950;
+  --level-W: #d29922;
+  --level-E: #f85149;
+  --level-F: #f778ba;
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+#root { height: 100%; }
+
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
+.app.sidebar-collapsed .sidebar {
+  display: none;
+}
+
+/* ─── Header ─── */
+.header {
+  grid-column: 1 / -1;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 10;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.btn-accent {
+  background: #238636;
+  border-color: #2ea043;
+}
+
+.btn-accent:hover {
+  background: #2ea043;
+}
+
+.search-box {
+  position: relative;
+  flex: 1;
+  max-width: 500px;
+}
+
+.search-box input {
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px 6px 32px;
+  font-size: 13px;
+  outline: none;
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', monospace;
+}
+
+.search-box input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px #58a6ff33;
+}
+
+.search-box .search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.regex-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.regex-toggle.active {
+  background: #58a6ff22;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.search-match-count {
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.stats-badge {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.stats-badge strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ─── Sidebar ─── */
+.sidebar {
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.sidebar-section h3 {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.level-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.level-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  font-family: monospace;
+  opacity: 0.35;
+}
+
+.level-btn.active { opacity: 1; }
+.level-btn:hover { opacity: 0.8; }
+
+.level-btn .count {
+  font-size: 10px;
+  opacity: 0.7;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
+.level-V { background: #6e768122; color: var(--level-V); border-color: #6e768144; }
+.level-V.active { background: #6e768144; border-color: var(--level-V); }
+.level-D { background: #58a6ff18; color: var(--level-D); border-color: #58a6ff44; }
+.level-D.active { background: #58a6ff33; border-color: var(--level-D); }
+.level-I { background: #3fb95018; color: var(--level-I); border-color: #3fb95044; }
+.level-I.active { background: #3fb95033; border-color: var(--level-I); }
+.level-W { background: #d2992218; color: var(--level-W); border-color: #d2992244; }
+.level-W.active { background: #d2992233; border-color: var(--level-W); }
+.level-E { background: #f8514918; color: var(--level-E); border-color: #f8514944; }
+.level-E.active { background: #f8514933; border-color: var(--level-E); }
+.level-F { background: #f778ba18; color: var(--level-F); border-color: #f778ba44; }
+.level-F.active { background: #f778ba33; border-color: var(--level-F); }
+
+.tag-search {
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-search:focus { border-color: var(--accent); }
+.tag-search::placeholder { color: var(--text-muted); }
+
+.tag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 400px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.tag-list::-webkit-scrollbar { width: 4px; }
+.tag-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.tag-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.1s;
+}
+
+.tag-item:hover { background: var(--bg-hover); }
+.tag-item input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
+
+.tag-item .tag-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-item .tag-count {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.tag-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tag-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.tag-action-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.tag-action-btn:hover { text-decoration: underline; }
+
+/* ─── Log Viewer ─── */
+.log-container {
+  overflow: hidden;
+  position: relative;
+  background: var(--bg-app);
+}
+
+.log-virtual-list {
+  overflow-y: auto;
+  height: 100%;
+  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Menlo', 'Consolas', monospace;
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.log-virtual-list::-webkit-scrollbar { width: 10px; }
+.log-virtual-list::-webkit-scrollbar-track { background: var(--bg-app); }
+.log-virtual-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; border: 2px solid var(--bg-app); }
+.log-virtual-list::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+.log-line {
+  display: flex;
+  align-items: flex-start;
+  padding: 0 12px;
+  min-height: 20px;
+}
+
+.log-line:hover { background: var(--bg-hover) !important; }
+
+.log-timestamp {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 120px;
+  font-size: 11px;
+}
+
+.log-pid {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  width: 55px;
+  font-size: 11px;
+}
+
+.log-tid {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 55px;
+  font-size: 11px;
+}
+
+.log-level {
+  flex-shrink: 0;
+  width: 22px;
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+}
+
+.log-tag {
+  flex-shrink: 0;
+  width: 160px;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.log-msg {
+  flex: 1;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.log-msg .search-hl {
+  background: #d2992266;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.log-level-V { color: var(--level-V); }
+.log-level-D { color: var(--level-D); }
+.log-level-I { color: var(--level-I); }
+.log-level-W { color: var(--level-W); }
+.log-level-E { color: var(--level-E); }
+.log-level-F { color: var(--level-F); }
+
+/* ─── Empty / Drop Zone ─── */
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: var(--text-secondary);
+  border: 2px dashed transparent;
+  transition: all 0.2s;
+}
+
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: #58a6ff0a;
+}
+
+.drop-zone-icon {
+  font-size: 72px;
+  opacity: 0.25;
+  line-height: 1;
+}
+
+.drop-zone-text { font-size: 18px; font-weight: 500; }
+.drop-zone-hint { font-size: 13px; color: var(--text-muted); }
+
+.drop-zone .btn { font-size: 14px; padding: 10px 24px; }
+
+/* ─── Summary Bar ─── */
+.log-summary {
+  background: var(--bg-header);
+  border-top: 1px solid var(--border);
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.log-summary .sep { color: var(--text-muted); }
+.log-summary strong { color: var(--text-primary); }
+
+/* ─── Loading ─── */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13, 17, 23, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 50;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.loading-text { color: var(--text-secondary); font-size: 14px; }
+
+/* ─── Keyboard ─── */
+.kbd {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo, memo } = React;
+
+/* ═══════════════════════════════════════════
+   Logcat Parser
+   ═══════════════════════════════════════════ */
+const LOGCAT_THREADTIME = /^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+(.+?)\s*:\s([\s\S]*)$/;
+const LOGCAT_BRIEF      = /^([VDIWEF])\/(.+?)\(\s*(\d+)\):\s([\s\S]*)$/;
+const LOGCAT_PROCESS    = /^([VDIWEF])\(\s*(\d+)\)\s+(.+?)$/;
+const LOGCAT_TAG        = /^([VDIWEF])\/(.+?):\s([\s\S]*)$/;
+
+function parseLogcatLine(line) {
+  let m;
+
+  // threadtime: "05-26 12:00:00.123  1234  5678 I ActivityManager: message"
+  m = LOGCAT_THREADTIME.exec(line);
+  if (m) {
+    return {
+      date: m[1], time: m[2],
+      pid: m[3], tid: m[4],
+      level: m[5],
+      tag: m[6].trim(),
+      message: m[7]
+    };
+  }
+
+  // brief: "I/ActivityManager( 1234): message"
+  m = LOGCAT_BRIEF.exec(line);
+  if (m) {
+    return {
+      date: '', time: '',
+      pid: m[3], tid: '',
+      level: m[1],
+      tag: m[2].trim(),
+      message: m[4]
+    };
+  }
+
+  // process: "I( 1234) message"
+  m = LOGCAT_PROCESS.exec(line);
+  if (m) {
+    return {
+      date: '', time: '',
+      pid: m[2], tid: '',
+      level: m[1],
+      tag: '',
+      message: m[3]
+    };
+  }
+
+  // tag: "I/TagName: message"
+  m = LOGCAT_TAG.exec(line);
+  if (m) {
+    return {
+      date: '', time: '',
+      pid: '', tid: '',
+      level: m[1],
+      tag: m[2].trim(),
+      message: m[3]
+    };
+  }
+
+  // plain text fallback
+  if (line.trim()) {
+    return {
+      date: '', time: '',
+      pid: '', tid: '',
+      level: '',
+      tag: '',
+      message: line
+    };
+  }
+
+  return null;
+}
+
+function parseLog(text) {
+  const lines = text.split('\n');
+  const entries = [];
+  for (let i = 0; i < lines.length; i++) {
+    const e = parseLogcatLine(lines[i]);
+    if (e) {
+      e.lineNum = i + 1;
+      entries.push(e);
+    }
+  }
+  return entries;
+}
+
+/* ═══════════════════════════════════════════
+   Tag Color Generator
+   ═══════════════════════════════════════════ */
+function hashCode(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function tagColor(tag) {
+  if (!tag) return 'var(--text-muted)';
+  const h = hashCode(tag);
+  const hue = h % 360;
+  return `hsl(${hue}, 55%, 68%)`;
+}
+
+/* ═══════════════════════════════════════════
+   Virtual List (custom implementation)
+   ═══════════════════════════════════════════ */
+const ROW_HEIGHT = 20;
+
+function VirtualList({ items, renderItem, emptyMessage }) {
+  const containerRef = useRef(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(600);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setContainerHeight(entry.contentRect.height);
+    });
+    ro.observe(el);
+    setContainerHeight(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+
+  // Reset scroll when items change significantly
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = 0;
+      setScrollTop(0);
+    }
+  }, [items.length]);
+
+  const totalHeight = items.length * ROW_HEIGHT;
+  const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 5);
+  const visibleCount = Math.ceil(containerHeight / ROW_HEIGHT) + 10;
+  const endIdx = Math.min(startIdx + visibleCount, items.length);
+  const offsetY = startIdx * ROW_HEIGHT;
+
+  const handleScroll = useCallback((e) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  }, []);
+
+  if (items.length === 0 && emptyMessage) {
+    return (
+      <div ref={containerRef} className="log-virtual-list" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>{emptyMessage}</span>
+      </div>
+    );
+  }
+
+  const visibleItems = [];
+  for (let i = startIdx; i < endIdx; i++) {
+    visibleItems.push(renderItem(items[i], i));
+  }
+
+  return (
+    <div ref={containerRef} className="log-virtual-list" onScroll={handleScroll}>
+      <div style={{ height: totalHeight, position: 'relative' }}>
+        <div style={{ position: 'absolute', top: offsetY, left: 0, right: 0 }}>
+          {visibleItems}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   LogLine Component
+   ═══════════════════════════════════════════ */
+const LEVEL_COLORS = {
+  V: 'var(--level-V)', D: 'var(--level-D)',
+  I: 'var(--level-I)', W: 'var(--level-W)',
+  E: 'var(--level-E)', F: 'var(--level-F)'
+};
+
+const LogLine = memo(function LogLine({ entry, idx, searchRegex }) {
+  const rowBg = idx % 2 === 0 ? 'var(--bg-log-even)' : 'var(--bg-log-odd)';
+
+  const renderMessage = () => {
+    const msg = entry.message;
+    if (!searchRegex || !msg) return msg;
+    try {
+      const re = new RegExp(searchRegex.source, searchRegex.flags);
+      const parts = msg.split(re);
+      if (parts.length === 1) return msg;
+      return parts.map((part, i) => {
+        if (i % 2 === 1) {
+          return React.createElement('span', { key: i, className: 'search-hl' }, part);
+        }
+        return part;
+      });
+    } catch {
+      return msg;
+    }
+  };
+
+  return (
+    <div className="log-line" style={{ background: rowBg }}>
+      <span className="log-timestamp">{entry.time || entry.date}</span>
+      <span className="log-pid">{entry.pid}</span>
+      <span className="log-tid">{entry.tid}</span>
+      <span className={`log-level log-level-${entry.level}`}>{entry.level}</span>
+      <span className="log-tag" style={{ color: tagColor(entry.tag) }} title={entry.tag}>
+        {entry.tag}
+      </span>
+      <span className="log-msg" style={{ color: LEVEL_COLORS[entry.level] || 'var(--text-primary)' }}>
+        {renderMessage()}
+      </span>
+    </div>
+  );
+});
+
+/* ═══════════════════════════════════════════
+   Main App
+   ═══════════════════════════════════════════ */
+function App() {
+  // ─── State ───
+  const [entries, setEntries] = useState([]);
+  const [fileName, setFileName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [useRegex, setUseRegex] = useState(false);
+  const [activeLevels, setActiveLevels] = useState(new Set(['V', 'D', 'I', 'W', 'E', 'F']));
+  const [selectedTags, setSelectedTags] = useState(new Set());
+  const [tagSearch, setTagSearch] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // ─── Computed: Tag Stats ───
+  const tagStats = useMemo(() => {
+    const stats = {};
+    for (const e of entries) {
+      if (e.tag) {
+        if (!stats[e.tag]) stats[e.tag] = { count: 0, color: tagColor(e.tag) };
+        stats[e.tag].count++;
+      }
+    }
+    return stats;
+  }, [entries]);
+
+  // ─── Computed: Level Stats ───
+  const levelStats = useMemo(() => {
+    const s = { V: 0, D: 0, I: 0, W: 0, E: 0, F: 0 };
+    for (const e of entries) {
+      if (s[e.level] !== undefined) s[e.level]++;
+    }
+    return s;
+  }, [entries]);
+
+  // ─── Computed: Visible Tags (filtered by search) ───
+  const visibleTags = useMemo(() => {
+    const allTags = Object.keys(tagStats).sort((a, b) => tagStats[b].count - tagStats[a].count);
+    if (!tagSearch) return allTags;
+    const q = tagSearch.toLowerCase();
+    return allTags.filter(t => t.toLowerCase().includes(q));
+  }, [tagStats, tagSearch]);
+
+  // ─── Computed: Search Regex ───
+  const searchRegex = useMemo(() => {
+    if (!searchQuery) return null;
+    try {
+      if (useRegex) return new RegExp(searchQuery, 'gi');
+      const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(escaped, 'gi');
+    } catch {
+      return null;
+    }
+  }, [searchQuery, useRegex]);
+
+  // ─── Computed: Filtered Entries ───
+  const filteredEntries = useMemo(() => {
+    if (entries.length === 0) return [];
+
+    return entries.filter(e => {
+      // Level filter
+      if (!activeLevels.has(e.level)) return false;
+      // Tag filter (if any tags are explicitly selected)
+      if (selectedTags.size > 0 && !selectedTags.has(e.tag)) return false;
+      // Search filter
+      if (searchRegex) {
+        searchRegex.lastIndex = 0;
+        const inMsg = searchRegex.test(e.message);
+        searchRegex.lastIndex = 0;
+        const inTag = searchRegex.test(e.tag);
+        if (!inMsg && !inTag) return false;
+      }
+      return true;
+    });
+  }, [entries, activeLevels, selectedTags, searchRegex]);
+
+  // ─── File Loading ───
+  const loadFile = useCallback((file) => {
+    setLoading(true);
+    setLoadProgress('Reading file...');
+    setFileName(file.name);
+    setSelectedTags(new Set());
+    setTagSearch('');
+
+    // Use setTimeout to allow UI to update before heavy parsing
+    setTimeout(() => {
+      const reader = new FileReader();
+
+      reader.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          const mb = (e.loaded / 1024 / 1024).toFixed(1);
+          setLoadProgress(`Loading... ${pct}% (${mb} MB)`);
+        }
+      };
+
+      reader.onload = (e) => {
+        setLoadProgress('Parsing logcat...');
+        // Another setTimeout for the parsing step
+        setTimeout(() => {
+          const parsed = parseLog(e.target.result);
+          setEntries(parsed);
+          setActiveLevels(new Set(['V', 'D', 'I', 'W', 'E', 'F']));
+          setSearchQuery('');
+          setLoading(false);
+          setLoadProgress('');
+        }, 50);
+      };
+
+      reader.onerror = () => {
+        setLoading(false);
+        setLoadProgress('');
+        alert('Failed to read file. Please try again.');
+      };
+
+      reader.readAsText(file);
+    }, 100);
+  }, []);
+
+  // ─── Drag & Drop ───
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) loadFile(file);
+  }, [loadFile]);
+
+  // ─── File Input ───
+  const handleFileSelect = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (file) loadFile(file);
+    // Reset input so the same file can be selected again
+    e.target.value = '';
+  }, [loadFile]);
+
+  // ─── Filter Actions ───
+  const toggleLevel = useCallback((level) => {
+    setActiveLevels(prev => {
+      const next = new Set(prev);
+      if (next.has(level)) next.delete(level);
+      else next.add(level);
+      return next;
+    });
+  }, []);
+
+  const toggleTag = useCallback((tag) => {
+    setSelectedTags(prev => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
+  }, []);
+
+  const selectAllTags = useCallback(() => {
+    setSelectedTags(new Set(Object.keys(tagStats)));
+  }, [tagStats]);
+
+  const clearTags = useCallback(() => {
+    setSelectedTags(new Set());
+  }, []);
+
+  // ─── Export ───
+  const exportFiltered = useCallback(() => {
+    const text = filteredEntries.map(e =>
+      `${e.date} ${e.time} ${e.pid} ${e.tid} ${e.level} ${e.tag}: ${e.message}`
+    ).join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `filtered_${fileName || 'logcat'}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [filteredEntries, fileName]);
+
+  // ─── Keyboard Shortcuts ───
+  useEffect(() => {
+    const handler = (e) => {
+      // Ctrl+F / Cmd+F → Focus search
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        document.querySelector('.search-box input')?.focus();
+      }
+      // Escape → Clear search
+      if (e.key === 'Escape') {
+        setSearchQuery('');
+        document.querySelector('.search-box input')?.blur();
+      }
+      // Ctrl+B / Cmd+B → Toggle sidebar
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        setSidebarOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // ─── Render ───
+  const hasEntries = entries.length > 0;
+
+  const renderLogLine = useCallback((entry, idx) => (
+    <LogLine
+      key={entry.lineNum || idx}
+      entry={entry}
+      idx={idx}
+      searchRegex={searchRegex}
+    />
+  ), [searchRegex]);
+
+  return (
+    <div className={`app ${!sidebarOpen ? 'sidebar-collapsed' : ''}`}>
+
+      {/* ─── Header Bar ─── */}
+      <div className="header">
+        <div className="header-left">
+          <button
+            className="btn"
+            onClick={() => setSidebarOpen(p => !p)}
+            title="Toggle sidebar (Ctrl+B)"
+            style={{ padding: '6px 8px' }}
+          >
+            {sidebarOpen ? '◀' : '▶'}
+          </button>
+          <strong style={{ fontSize: 15, color: 'var(--accent)' }}>
+            {'\u{1F50D}'} LogCat Viewer
+          </strong>
+          {fileName && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>
+              {fileName}
+            </span>
+          )}
+        </div>
+
+        <div className="search-box">
+          <span className="search-icon">{'\u{1F50E}'}</span>
+          <input
+            type="text"
+            placeholder="Search messages... (Ctrl+F)"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            disabled={!hasEntries}
+          />
+        </div>
+
+        <button
+          className={`regex-toggle ${useRegex ? 'active' : ''}`}
+          onClick={() => setUseRegex(p => !p)}
+          title="Toggle regex mode"
+        >
+          .* regex
+        </button>
+
+        {searchQuery && (
+          <span className="search-match-count">
+            {filteredEntries.length} matches
+          </span>
+        )}
+
+        <div className="header-right">
+          {hasEntries && (
+            <>
+              <span className="stats-badge">
+                <strong>{filteredEntries.length.toLocaleString()}</strong> / {entries.length.toLocaleString()} lines
+              </span>
+              <button className="btn" onClick={exportFiltered} title="Export filtered logs">
+                {'\u{1F4E5}'} Export
+              </button>
+            </>
+          )}
+          <button className="btn btn-accent" onClick={() => fileInputRef.current?.click()}>
+            {'\u{1F4C2}'} Open File
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".log,.txt,.logcat,.out,.log.1"
+            style={{ display: 'none' }}
+            onChange={handleFileSelect}
+          />
+        </div>
+      </div>
+
+      {/* ─── Sidebar ─── */}
+      {sidebarOpen && (
+        <div className="sidebar">
+
+          {/* Log Levels */}
+          <div className="sidebar-section">
+            <h3>Log Levels</h3>
+            <div className="level-filters">
+              {['V', 'D', 'I', 'W', 'E', 'F'].map(level => (
+                <button
+                  key={level}
+                  className={`level-btn level-${level} ${activeLevels.has(level) ? 'active' : ''}`}
+                  onClick={() => toggleLevel(level)}
+                >
+                  {level}
+                  <span className="count">{levelStats[level]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="tag-actions" style={{ marginTop: 8 }}>
+              <button className="tag-action-btn" onClick={() => setActiveLevels(new Set(['V','D','I','W','E','F']))}>
+                All
+              </button>
+              <button className="tag-action-btn" onClick={() => setActiveLevels(new Set(['W','E','F']))}>
+                W+E+F
+              </button>
+              <button className="tag-action-btn" onClick={() => setActiveLevels(new Set(['E','F']))}>
+                E+F only
+              </button>
+            </div>
+          </div>
+
+          {/* Tags */}
+          {hasEntries && (
+            <div className="sidebar-section">
+              <h3>Tags ({Object.keys(tagStats).length})</h3>
+              <input
+                className="tag-search"
+                type="text"
+                placeholder="Filter tags..."
+                value={tagSearch}
+                onChange={e => setTagSearch(e.target.value)}
+              />
+              <div className="tag-list">
+                {visibleTags.map(tag => (
+                  <label key={tag} className="tag-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedTags.size === 0 || selectedTags.has(tag)}
+                      onChange={() => toggleTag(tag)}
+                    />
+                    <span className="tag-color-dot" style={{ background: tagStats[tag].color }} />
+                    <span className="tag-name" title={tag}>{tag}</span>
+                    <span className="tag-count">{tagStats[tag].count.toLocaleString()}</span>
+                  </label>
+                ))}
+                {visibleTags.length === 0 && (
+                  <div style={{ padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' }}>
+                    No matching tags
+                  </div>
+                )}
+              </div>
+              <div className="tag-actions">
+                <button className="tag-action-btn" onClick={selectAllTags}>Select All</button>
+                <button className="tag-action-btn" onClick={clearTags}>Show All</button>
+              </div>
+            </div>
+          )}
+
+          {/* Shortcuts */}
+          <div className="sidebar-section">
+            <h3>Keyboard Shortcuts</h3>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: '24px' }}>
+              <div><span className="kbd">Ctrl</span>+<span className="kbd">F</span> &nbsp;Search</div>
+              <div><span className="kbd">Ctrl</span>+<span className="kbd">B</span> &nbsp;Toggle sidebar</div>
+              <div><span className="kbd">Esc</span> &nbsp;Clear search</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Main Log View ─── */}
+      <div
+        className="log-container"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {/* Loading Overlay */}
+        {loading && (
+          <div className="loading-overlay">
+            <div className="spinner" />
+            <div className="loading-text">{loadProgress}</div>
+          </div>
+        )}
+
+        {/* Empty State / Drop Zone */}
+        {!hasEntries && !loading ? (
+          <div className={`drop-zone ${dragOver ? 'drag-over' : ''}`}>
+            <div className="drop-zone-icon">{'\u{1F4C4}'}</div>
+            <div className="drop-zone-text">Drag & drop a logcat file here</div>
+            <div className="drop-zone-hint">
+              Supports logcat formats: threadtime, brief, process, tag
+            </div>
+            <button
+              className="btn btn-accent"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {'\u{1F4C2}'} Or click to open a file
+            </button>
+            <div style={{ marginTop: 24, color: 'var(--text-muted)', fontSize: 12, textAlign: 'center', lineHeight: '20px' }}>
+              Tip: You can also use <span className="kbd">adb logcat -d > mylog.txt</span> to save logs first,<br/>
+              then open the file here for powerful filtering and searching.
+            </div>
+          </div>
+        ) : hasEntries && !loading ? (
+          <>
+            <VirtualList
+              items={filteredEntries}
+              renderItem={renderLogLine}
+              emptyMessage="No log entries match your current filters"
+            />
+
+            {/* Summary Bar */}
+            <div className="log-summary">
+              <span>
+                <strong>{filteredEntries.length.toLocaleString()}</strong> lines shown
+                {filteredEntries.length < entries.length &&
+                  ` (filtered from ${entries.length.toLocaleString()})`
+                }
+              </span>
+              <span className="sep">|</span>
+              <span style={{ color: 'var(--level-E)' }}>
+                {levelStats.E} errors
+              </span>
+              <span className="sep">|</span>
+              <span style={{ color: 'var(--level-W)' }}>
+                {levelStats.W} warnings
+              </span>
+              <span className="sep">|</span>
+              <span>
+                {Object.keys(tagStats).length} tags
+              </span>
+              {selectedTags.size > 0 && (
+                <>
+                  <span className="sep">|</span>
+                  <span style={{ color: 'var(--accent)' }}>
+                    {selectedTags.size} tags selected
+                  </span>
+                </>
+              )}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Mount ─── */
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>
