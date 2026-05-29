@@ -136,7 +136,7 @@ function VirtualList(props) {
 
   return h('div', { ref: ref, className: 'log-scroll', onScroll: function(e) { setTop(e.currentTarget.scrollTop); } },
     h('div', { style: { height: total, position: 'relative' } },
-      h('div', { style: { position: 'absolute', top: oy, left: 0, right: 0 } }, rows)
+      h('div', { style: { position: 'absolute', top: oy, left: 0, whiteSpace: 'nowrap' } }, rows)
     )
   );
 }
@@ -149,32 +149,35 @@ var LogLine = memo(function LogLine(props) {
   var isActive = props.isActiveMatch;
   var bg = isActive ? undefined : (idx % 2 === 0 ? 'var(--bg-log-even)' : 'var(--bg-log-odd)');
 
-  function renderMsg() {
-    var msg = entry.message;
-    if (!searchRe || !msg) return msg;
+  function highlightText(text) {
+    if (!searchRe || !text) return text;
     try {
       var re = new RegExp(searchRe.source, 'gi');
       var result = [];
       var last = 0;
       var m;
-      while ((m = re.exec(msg)) !== null) {
-        if (m.index > last) result.push(msg.substring(last, m.index));
+      while ((m = re.exec(text)) !== null) {
+        if (m.index > last) result.push(text.substring(last, m.index));
         result.push(h('span', { key: last, className: 'search-hl' }, m[0]));
         last = m.index + m[0].length;
-        if (m[0].length === 0) { re.lastIndex++; continue; } // avoid infinite loop on zero-length match
+        if (m[0].length === 0) { re.lastIndex++; continue; }
       }
-      if (last < msg.length) result.push(msg.substring(last));
-      if (result.length === 0) return msg;
+      if (last < text.length) result.push(text.substring(last));
+      if (result.length === 0) return text;
       return result;
-    } catch (e) { return msg; }
+    } catch (e) { return text; }
+  }
+
+  function renderMsg() {
+    return highlightText(entry.message);
   }
 
   return h('div', { className: 'log-line' + (isActive ? ' active-match' : ''), style: { background: bg } },
     h('span', { className: 'log-timestamp' }, entry.time || entry.date),
-    h('span', { className: 'log-pid' }, entry.pid),
-    h('span', { className: 'log-tid' }, entry.tid),
+    h('span', { className: 'log-pid' }, highlightText(entry.pid)),
+    h('span', { className: 'log-tid' }, highlightText(entry.tid)),
     h('span', { className: 'log-level log-level-' + entry.level }, entry.level),
-    h('span', { className: 'log-tag', style: { color: tagColor(entry.tag) }, title: entry.tag }, entry.tag),
+    h('span', { className: 'log-tag', style: { color: tagColor(entry.tag) }, title: entry.tag }, highlightText(entry.tag)),
     h('span', { className: 'log-msg', style: { color: LEVEL_COLORS[entry.level] || 'var(--text-primary)' } }, renderMsg())
   );
 });
@@ -290,7 +293,11 @@ function App() {
         var inMsg = re.test(e.message);
         re.lastIndex = 0;
         var inTag = re.test(e.tag);
-        if (!inMsg && !inTag) return false;
+        re.lastIndex = 0;
+        var inPid = re.test(e.pid);
+        re.lastIndex = 0;
+        var inTid = re.test(e.tid);
+        if (!inMsg && !inTag && !inPid && !inTid) return false;
       }
       return true;
     });
@@ -314,7 +321,11 @@ function App() {
       var inMsg = re.test(filtered[i].message);
       re.lastIndex = 0;
       var inTag = re.test(filtered[i].tag);
-      if (inMsg || inTag) indices.push(i);
+      re.lastIndex = 0;
+      var inPid = re.test(filtered[i].pid);
+      re.lastIndex = 0;
+      var inTid = re.test(filtered[i].tid);
+      if (inMsg || inTag || inPid || inTid) indices.push(i);
     }
     return indices;
   }, [filtered, searchRe, tab.searchMode]);
@@ -466,7 +477,14 @@ function App() {
   // ─── Keyboard ───
   useEffect(function() {
     function handler(e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') { e.preventDefault(); document.querySelector('.search-box input')?.focus(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        var sel = window.getSelection();
+        var text = sel ? sel.toString().trim() : '';
+        if (text) updateTab(activeId, { query: text });
+        var input = document.querySelector('.search-box input');
+        if (input) { input.focus(); input.select(); }
+      }
       if (e.key === 'Escape') { updateTab(activeId, { query: '' }); document.querySelector('.search-box input')?.blur(); }
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') { e.preventDefault(); setSidebar(function(p) { return !p; }); }
       // Enter/Shift+Enter to navigate matches when search input is focused
@@ -491,7 +509,7 @@ function App() {
     ),
     h('div', { className: 'search-box' },
       h('span', { className: 'search-icon' }, '🔎'),
-      h('input', { type: 'text', placeholder: 'Search messages... (Ctrl+F)', value: tab.query || '', onChange: function(e) { updateTab(activeId, { query: e.target.value }); }, disabled: !hasData })
+      h('input', { type: 'text', placeholder: 'Search message / tag / pid / tid... (Ctrl+F)', value: tab.query || '', onChange: function(e) { updateTab(activeId, { query: e.target.value }); }, disabled: !hasData })
     ),
     h('button', { className: 'regex-toggle' + (tab.useRegex ? ' active' : ''), onClick: function() { updateTab(activeId, { useRegex: !tab.useRegex }); }, title: 'Toggle regex' }, '.* regex'),
     tab.query ? h('div', { className: 'search-nav' },

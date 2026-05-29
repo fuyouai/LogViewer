@@ -252,6 +252,7 @@
     .log-container { grid-row: 3; overflow: hidden; position: relative; background: var(--bg-app); }
 
     .log-scroll {
+      overflow-x: auto;
       overflow-y: auto;
       height: 100%;
       font-family: 'SF Mono', Monaco, 'Cascadia Code', Menlo, Consolas, monospace;
@@ -279,7 +280,7 @@
       white-space: nowrap;
       font-weight: 500;
     }
-    .log-msg { flex: 1; word-break: break-all; white-space: pre-wrap; }
+    .log-msg { flex: 1; white-space: nowrap; min-width: 0; }
     .log-msg .search-hl { background: #d2992266; border-radius: 2px; padding: 0 1px; }
 
     .log-level-V { color: var(--level-V); }
