@@ -123,6 +123,10 @@ ipcMain.handle('file:save', async (event, { content, defaultName }) => {
   return true;
 });
 
+ipcMain.handle('app:getLocale', () => {
+  return app.getLocale();
+});
+
 // ─── App Lifecycle ───
 
 app.whenReady().then(async () => {

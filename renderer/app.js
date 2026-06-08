@@ -10,6 +10,7 @@ const RE_THREADTIME_YEAR = /^\d{4}-(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+
 const RE_LONG      = /^(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)-(\d+)\s+(\S+)\s+\S+\s+([VDIWEF])\s+([\s\S]*)$/;
 const RE_LONG_DATE = /^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)-(\d+)\s+(\S+)\s+\S+\s+([VDIWEF])\s+([\s\S]*)$/;
 const RE_THREADTIME = /^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+(.+?)\s*:\s([\s\S]*)$/;
+const RE_BRIEF_DATE = /^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+([VDIWEF])\/(.+?)\(\s*(\d+)\):\s([\s\S]*)$/;
 const RE_BRIEF = /^([VDIWEF])\/(.+?)\(\s*(\d+)\):\s([\s\S]*)$/;
 const RE_PROCESS = /^([VDIWEF])\(\s*(\d+)\)\s+(.+?)$/;
 const RE_TAG = /^([VDIWEF])\/(.+?):\s([\s\S]*)$/;
@@ -27,6 +28,8 @@ function parseLine(line) {
   if (m) return { date: '', time: m[1], pid: m[2], tid: m[3], level: m[5], tag: m[4].trim(), message: m[6] };
   m = RE_THREADTIME.exec(line);
   if (m) return { date: m[1], time: m[2], pid: m[3], tid: m[4], level: m[5], tag: m[6].trim(), message: m[7] };
+  m = RE_BRIEF_DATE.exec(line);
+  if (m) return { date: m[1], time: m[2], pid: m[5], tid: '', level: m[3], tag: m[4].trim(), message: m[6] };
   m = RE_BRIEF.exec(line);
   if (m) return { date: '', time: '', pid: m[3], tid: '', level: m[1], tag: m[2].trim(), message: m[4] };
   m = RE_PROCESS.exec(line);
@@ -75,6 +78,7 @@ function makeTab(fileName) {
     entries: [],
     levels: new Set(LEVELS),
     selTags: new Set(),
+    allTagsShown: true,
     tagSearch: '',
     query: '',
     useRegex: false,
@@ -192,7 +196,7 @@ function RawViewer(props) {
 
   return h('div', { className: 'log-scroll', style: { padding: '12px' } },
     h('div', { style: { marginBottom: 12, color: 'var(--text-secondary)', fontSize: 13 } },
-      'Could not detect logcat format. Showing raw content (first ' + maxLines + ' of ' + lines.length + ' lines):'
+      window.__i18n ? window.__i18n.t('raw.info', { max: maxLines, total: lines.length }) : 'Could not detect logcat format. Showing raw content (first ' + maxLines + ' of ' + lines.length + ' lines):'
     ),
     lines.slice(0, maxLines).map(function(line, i) {
       return h('div', { key: i, style: {
@@ -218,6 +222,14 @@ function App() {
   var _sb = useState(true); var sidebar = _sb[0], setSidebar = _sb[1];
   var _dr = useState(false); var dragOver = _dr[0], setDragOver = _dr[1];
   var fileRef = useRef(null);
+  var _locale = useState(function() { return window.__i18n ? window.__i18n.getLocale() : 'en'; });
+  var locale = _locale[0], setLocaleState = _locale[1];
+  function t(key, params) { return window.__i18n ? window.__i18n.t(key, params) : key; }
+  function toggleLocale() {
+    var next = locale === 'zh' ? 'en' : 'zh';
+    if (window.__i18n) window.__i18n.setLocale(next);
+    setLocaleState(next);
+  }
 
   // ─── Active tab helpers ───
   function getTab(id) {
@@ -287,6 +299,7 @@ function App() {
     return entries.filter(function(e) {
       if (!e.level) return true;
       if (!tab.levels.has(e.level)) return false;
+      if (!tab.allTagsShown && tab.selTags.size === 0) return false;
       if (tab.selTags.size > 0 && !tab.selTags.has(e.tag)) return false;
       if (re && mode === 'hide') {
         re.lastIndex = 0;
@@ -301,7 +314,7 @@ function App() {
       }
       return true;
     });
-  }, [entries, tab.levels, tab.selTags, searchRe, tab.searchMode]);
+  }, [entries, tab.levels, tab.selTags, tab.allTagsShown, searchRe, tab.searchMode]);
 
   // Indices into `filtered` where search matches (for highlight mode navigation)
   var matchIndices = useMemo(function() {
@@ -333,7 +346,7 @@ function App() {
   // Reset activeMatch when search/filter changes
   useEffect(function() {
     updateTab(activeId, { activeMatch: -1 });
-  }, [tab.query, tab.useRegex, tab.searchMode, tab.levels, tab.selTags]);
+  }, [tab.query, tab.useRegex, tab.searchMode, tab.levels, tab.selTags, tab.allTagsShown]);
 
   // The index in `filtered` that corresponds to the current activeMatch
   var scrollToFilteredIdx = matchIndices.length > 0 && tab.activeMatch >= 0 && tab.activeMatch < matchIndices.length
@@ -351,7 +364,7 @@ function App() {
   // ─── File Loading ───
   function loadIntoTab(text, name, targetId) {
     var tid = targetId || activeId;
-    setProgress('Parsing logcat...');
+    setProgress(t('loading.parsing'));
     setTimeout(function() {
       var parsed = parseLog(text);
       var hasEntries = parsed.length > 0;
@@ -365,6 +378,7 @@ function App() {
             entries: parsed,
             levels: new Set(LEVELS),
             selTags: new Set(),
+            allTagsShown: true,
             tagSearch: '',
             query: '',
             useRegex: false,
@@ -394,14 +408,14 @@ function App() {
   function openViaElectron() {
     if (!window.electronAPI) { fileRef.current && fileRef.current.click(); return; }
     setLoading(true);
-    setProgress('Opening file dialog...');
+    setProgress(t('loading.openDialog'));
     window.electronAPI.openFile().then(function(info) {
       if (!info) { setLoading(false); setProgress(''); return; }
       var id = openNewTab(info.name);
-      setProgress('Reading ' + info.name + '...');
+      setProgress(t('loading.reading', { name: info.name }));
       window.electronAPI.onFileProgress(function(p) {
         if (p.total > 0) {
-          setProgress('Loading... ' + Math.round((p.loaded / p.total) * 100) + '% (' + (p.loaded / 1024 / 1024).toFixed(1) + ' MB)');
+          setProgress(t('loading.progress', { pct: Math.round((p.loaded / p.total) * 100), mb: (p.loaded / 1024 / 1024).toFixed(1) }));
         }
       });
       return window.electronAPI.readFile(info.path).then(function(text) {
@@ -414,17 +428,17 @@ function App() {
 
   function openViaHTML(file) {
     setLoading(true);
-    setProgress('Reading file...');
+    setProgress(t('loading.readingFile'));
     var id = openNewTab(file.name);
     setTimeout(function() {
       var reader = new FileReader();
       reader.onprogress = function(e) {
         if (e.lengthComputable) {
-          setProgress('Loading... ' + Math.round((e.loaded / e.total) * 100) + '% (' + (e.loaded / 1024 / 1024).toFixed(1) + ' MB)');
+          setProgress(t('loading.progress', { pct: Math.round((e.loaded / e.total) * 100), mb: (e.loaded / 1024 / 1024).toFixed(1) }));
         }
       };
       reader.onload = function(e) { loadIntoTab(e.target.result, file.name, id); };
-      reader.onerror = function() { setLoading(false); setProgress('Failed to read file'); };
+      reader.onerror = function() { setLoading(false); setProgress(t('loading.failed')); };
       reader.readAsText(file);
     }, 100);
   }
@@ -452,11 +466,9 @@ function App() {
   }
 
   function toggleTag(tag) {
-    updateTab(activeId, { selTags: (function() {
-      var next = new Set(tab.selTags);
-      if (next.has(tag)) next.delete(tag); else next.add(tag);
-      return next;
-    })() });
+    var next = new Set(tab.selTags);
+    if (next.has(tag)) next.delete(tag); else next.add(tag);
+    updateTab(activeId, { selTags: next, allTagsShown: false });
   }
 
   function doExport() {
@@ -504,45 +516,46 @@ function App() {
 
   var header = h('div', { className: 'header' },
     h('div', { className: 'header-left' },
-      h('button', { className: 'btn', onClick: function() { setSidebar(function(p) { return !p; }); }, title: 'Toggle sidebar (Ctrl+B)', style: { padding: '6px 8px' } }, sidebar ? '◀' : '▶'),
-      h('strong', { style: { fontSize: 15, color: 'var(--accent)' } }, 'LogViewer')
+      h('button', { className: 'btn', onClick: function() { setSidebar(function(p) { return !p; }); }, title: t('header.toggleSidebar'), style: { padding: '6px 8px' } }, sidebar ? '◀' : '▶'),
+      h('strong', { style: { fontSize: 15, color: 'var(--accent)' } }, t('app.title'))
     ),
     h('div', { className: 'search-box' },
       h('span', { className: 'search-icon' }, '🔎'),
-      h('input', { type: 'text', placeholder: 'Search message / tag / pid / tid... (Ctrl+F)', value: tab.query || '', onChange: function(e) { updateTab(activeId, { query: e.target.value }); }, disabled: !hasData })
+      h('input', { type: 'text', placeholder: t('header.searchPlaceholder'), value: tab.query || '', onChange: function(e) { updateTab(activeId, { query: e.target.value }); }, disabled: !hasData })
     ),
-    h('button', { className: 'regex-toggle' + (tab.useRegex ? ' active' : ''), onClick: function() { updateTab(activeId, { useRegex: !tab.useRegex }); }, title: 'Toggle regex' }, '.* regex'),
+    h('button', { className: 'regex-toggle' + (tab.useRegex ? ' active' : ''), onClick: function() { updateTab(activeId, { useRegex: !tab.useRegex }); }, title: t('header.regexToggle') }, '.* regex'),
     tab.query ? h('div', { className: 'search-nav' },
-      h('button', { className: 'search-nav-btn', onClick: function() { navMatch(-1); }, disabled: !matchIndices.length, title: 'Previous match (Shift+Enter)' }, '▲'),
-      h('button', { className: 'search-nav-btn', onClick: function() { navMatch(1); }, disabled: !matchIndices.length, title: 'Next match (Enter)' }, '▼')
+      h('button', { className: 'search-nav-btn', onClick: function() { navMatch(-1); }, disabled: !matchIndices.length, title: t('header.prevMatch') }, '▲'),
+      h('button', { className: 'search-nav-btn', onClick: function() { navMatch(1); }, disabled: !matchIndices.length, title: t('header.nextMatch') }, '▼')
     ) : null,
     tab.query ? h('span', { className: 'search-match-count' },
-      matchIndices.length > 0 && tab.activeMatch >= 0 ? (tab.activeMatch + 1) + '/' + matchIndices.length : matchIndices.length + ' matches'
+      matchIndices.length > 0 && tab.activeMatch >= 0 ? (tab.activeMatch + 1) + '/' + matchIndices.length : t('header.matches', { n: matchIndices.length })
     ) : null,
-    tab.query ? h('button', { className: 'search-mode-btn' + ((tab.searchMode || 'hide') === 'highlight' ? ' active' : ''), onClick: function() { updateTab(activeId, { searchMode: (tab.searchMode || 'hide') === 'hide' ? 'highlight' : 'hide' }); }, title: (tab.searchMode || 'hide') === 'hide' ? 'Currently: hiding non-matches. Click to show all' : 'Currently: showing all lines. Click to hide non-matches' }, (tab.searchMode || 'hide') === 'hide' ? '🔽 Filter' : '👁 Show all') : null,
+    tab.query ? h('button', { className: 'search-mode-btn' + ((tab.searchMode || 'hide') === 'highlight' ? ' active' : ''), onClick: function() { updateTab(activeId, { searchMode: (tab.searchMode || 'hide') === 'hide' ? 'highlight' : 'hide' }); }, title: (tab.searchMode || 'hide') === 'hide' ? t('header.tooltipFilter') : t('header.tooltipShowAll') }, (tab.searchMode || 'hide') === 'hide' ? t('header.filter') : t('header.showAll')) : null,
     h('div', { className: 'header-right' },
       hasData ? h('span', { className: 'stats-badge' }, h('strong', null, filtered.length.toLocaleString()), ' / ' + entries.length.toLocaleString()) : null,
-      hasData ? h('button', { className: 'btn', onClick: doExport, title: 'Export' }, '📥 Export') : null,
-      h('button', { className: 'btn btn-accent', onClick: openViaElectron }, '📂 Open'),
+      hasData ? h('button', { className: 'btn', onClick: doExport, title: t('header.exportTooltip') }, t('header.export')) : null,
+      h('button', { className: 'btn btn-accent', onClick: openViaElectron }, t('header.open')),
+      h('button', { className: 'btn', onClick: toggleLocale, title: locale === 'zh' ? 'Switch to English' : '切换到中文' }, locale === 'zh' ? '🌐 中文' : '🌐 EN'),
       h('input', { ref: fileRef, type: 'file', accept: '.log,.txt,.logcat,.out,.csv', style: { display: 'none' }, onChange: function(e) { var f = e.target.files && e.target.files[0]; if (f) openViaHTML(f); e.target.value = ''; } })
     )
   );
 
   // Tab bar
   var tabBar = h('div', { className: 'tab-bar' },
-    tabs.map(function(t) {
-      var isActive = t.id === activeId;
+    tabs.map(function(tb) {
+      var isActive = tb.id === activeId;
       return h('div', {
-        key: t.id,
+        key: tb.id,
         className: 'tab-item' + (isActive ? ' active' : ''),
-        onClick: function() { setActiveId(t.id); }
+        onClick: function() { setActiveId(tb.id); }
       },
-        h('span', { className: 'tab-name', title: t.fileName || 'Untitled' }, t.fileName || 'Untitled'),
-        t.entries.length > 0 ? h('span', { className: 'tab-count' }, t.entries.length.toLocaleString()) : null,
-        tabs.length > 1 ? h('button', { className: 'tab-close', onClick: function(e) { closeTab(t.id, e); }, title: 'Close tab' }, '×') : null
+        h('span', { className: 'tab-name', title: tb.fileName || t('tab.untitled') }, tb.fileName || t('tab.untitled')),
+        tb.entries.length > 0 ? h('span', { className: 'tab-count' }, tb.entries.length.toLocaleString()) : null,
+        tabs.length > 1 ? h('button', { className: 'tab-close', onClick: function(e) { closeTab(tb.id, e); }, title: t('tab.close') }, '×') : null
       );
     }),
-    h('div', { className: 'tab-add', onClick: function() { openViaElectron(); }, title: 'Open file in new tab' }, '+')
+    h('div', { className: 'tab-add', onClick: function() { openViaElectron(); }, title: t('tab.add') }, '+')
   );
 
   // Sidebar
@@ -556,7 +569,7 @@ function App() {
 
     var tagList = visTags.map(function(tag) {
       return h('label', { key: tag, className: 'tag-item' },
-        h('input', { type: 'checkbox', checked: tab.selTags.size === 0 || tab.selTags.has(tag), onChange: function() { toggleTag(tag); } }),
+        h('input', { type: 'checkbox', checked: tab.allTagsShown || tab.selTags.has(tag), onChange: function() { toggleTag(tag); } }),
         h('span', { className: 'tag-color-dot', style: { background: tagStats[tag].color } }),
         h('span', { className: 'tag-name', title: tag }, tag),
         h('span', { className: 'tag-count' }, tagStats[tag].count.toLocaleString())
@@ -565,33 +578,33 @@ function App() {
 
     sidebarEl = h('div', { className: 'sidebar' },
       h('div', { className: 'sidebar-section' },
-        h('h3', null, 'Log Levels'),
+        h('h3', null, t('sidebar.levels')),
         h('div', { className: 'level-filters' }, levelBtns),
         h('div', { className: 'tag-actions', style: { marginTop: 8 } },
-          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { levels: new Set(LEVELS) }); } }, 'All'),
+          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { levels: new Set(LEVELS) }); } }, t('sidebar.levelAll')),
           h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { levels: new Set(['W','E','F']) }); } }, 'W+E+F'),
-          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { levels: new Set(['E','F']) }); } }, 'E+F only')
+          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { levels: new Set(['E','F']) }); } }, t('sidebar.levelEF'))
         )
       ),
       hasData ? h('div', { className: 'sidebar-section' },
-        h('h3', null, 'Tags (' + Object.keys(tagStats).length + ')'),
-        h('input', { className: 'tag-search', type: 'text', placeholder: 'Filter tags...', value: tagSearchVal, onChange: function(e) { updateTab(activeId, { tagSearch: e.target.value }); } }),
+        h('h3', null, t('sidebar.tags', { n: Object.keys(tagStats).length })),
+        h('input', { className: 'tag-search', type: 'text', placeholder: t('sidebar.filterTags'), value: tagSearchVal, onChange: function(e) { updateTab(activeId, { tagSearch: e.target.value }); } }),
         h('div', { className: 'tag-list' },
-          tagList.length ? tagList : h('div', { style: { padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' } }, 'No matching tags')
+          tagList.length ? tagList : h('div', { style: { padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' } }, t('sidebar.noMatchingTags'))
         ),
         h('div', { className: 'tag-actions' },
-          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selTags: new Set(Object.keys(tagStats)) }); } }, 'Select All'),
-          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selTags: new Set() }); } }, 'Show All')
+          h('button', { className: 'tag-action-btn', onClick: function() { var allTags = Object.keys(tagStats); var allShown = tab.allTagsShown || tab.selTags.size >= allTags.length; if (allShown) { updateTab(activeId, { selTags: new Set(), allTagsShown: false }); } else { updateTab(activeId, { selTags: new Set(allTags), allTagsShown: false }); } } }, t('sidebar.selectAll')),
+          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selTags: new Set(), allTagsShown: true }); } }, t('sidebar.showAll'))
         )
       ) : null,
       h('div', { className: 'sidebar-section' },
-        h('h3', null, 'Shortcuts'),
+        h('h3', null, t('sidebar.shortcuts')),
         h('div', { style: { fontSize: 12, color: 'var(--text-secondary)', lineHeight: '24px' } },
-          h('div', null, h('span', { className: 'kbd' }, 'Ctrl+F'), '  Search'),
-          h('div', null, h('span', { className: 'kbd' }, 'Ctrl+B'), '  Toggle sidebar'),
-          h('div', null, h('span', { className: 'kbd' }, 'Esc'), '  Clear search'),
-          h('div', null, h('span', { className: 'kbd' }, 'Enter'), '  Next match'),
-          h('div', null, h('span', { className: 'kbd' }, 'Shift+Enter'), '  Prev match')
+          h('div', null, h('span', { className: 'kbd' }, 'Ctrl+F'), '  ' + t('shortcut.search')),
+          h('div', null, h('span', { className: 'kbd' }, 'Ctrl+B'), '  ' + t('shortcut.toggleSidebar')),
+          h('div', null, h('span', { className: 'kbd' }, 'Esc'), '  ' + t('shortcut.clearSearch')),
+          h('div', null, h('span', { className: 'kbd' }, 'Enter'), '  ' + t('shortcut.nextMatch')),
+          h('div', null, h('span', { className: 'kbd' }, 'Shift+Enter'), '  ' + t('shortcut.prevMatch'))
         )
       )
     );
@@ -604,30 +617,30 @@ function App() {
   } else if (hasRaw && !hasData) {
     mainContent = [
       h('div', { key: 'raw-info', style: { background: 'var(--bg-header)', borderBottom: '1px solid var(--border)', padding: '10px 16px', fontSize: 13, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 12 } },
-        h('span', { style: { color: '#d29922' } }, '⚠ Could not detect logcat format — Showing raw content')
+        h('span', { style: { color: '#d29922' } }, t('raw.warning'))
       ),
       h(RawViewer, { key: 'raw', text: tab.rawText })
     ];
   } else if (!hasData) {
     mainContent = h('div', { className: 'drop-zone' + (dragOver ? ' drag-over' : '') },
       h('div', { className: 'drop-zone-icon' }, '📄'),
-      h('div', { className: 'drop-zone-text' }, 'Drag & drop a logcat file here'),
-      h('div', { className: 'drop-zone-hint' }, 'Or click the + tab above / Open button'),
-      h('button', { className: 'btn btn-accent', onClick: openViaElectron }, '📂 Open a file')
+      h('div', { className: 'drop-zone-text' }, t('dropzone.text')),
+      h('div', { className: 'drop-zone-hint' }, t('dropzone.hint')),
+      h('button', { className: 'btn btn-accent', onClick: openViaElectron }, t('dropzone.open'))
     );
   } else {
-    var summaryText = filtered.length.toLocaleString() + ' lines';
-    if (filtered.length < entries.length) summaryText += ' (filtered from ' + entries.length.toLocaleString() + ')';
+    var summaryText = filtered.length.toLocaleString() + ' ' + t('summary.lines');
+    if (filtered.length < entries.length) summaryText += ' ' + t('summary.filtered', { n: entries.length.toLocaleString() });
     mainContent = [
-      h(VirtualList, { key: 'list', items: filtered, renderItem: renderRow, emptyMsg: 'No entries match current filters', scrollToIndex: scrollToFilteredIdx }),
+      h(VirtualList, { key: 'list', items: filtered, renderItem: renderRow, emptyMsg: t('empty.noMatch'), scrollToIndex: scrollToFilteredIdx }),
       h('div', { key: 'summary', className: 'log-summary' },
         h('span', null, h('strong', null, summaryText)),
         h('span', { className: 'sep' }, '|'),
-        h('span', { style: { color: 'var(--level-E)' } }, lvStats.E + ' errors'),
+        h('span', { style: { color: 'var(--level-E)' } }, lvStats.E + ' ' + t('summary.errors')),
         h('span', { className: 'sep' }, '|'),
-        h('span', { style: { color: 'var(--level-W)' } }, lvStats.W + ' warnings'),
+        h('span', { style: { color: 'var(--level-W)' } }, lvStats.W + ' ' + t('summary.warnings')),
         h('span', { className: 'sep' }, '|'),
-        h('span', null, Object.keys(tagStats).length + ' tags')
+        h('span', null, Object.keys(tagStats).length + ' ' + t('summary.tags'))
       )
     ];
   }
