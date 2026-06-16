@@ -79,6 +79,9 @@ function makeTab(fileName) {
     levels: new Set(LEVELS),
     selTags: new Set(),
     allTagsShown: true,
+    selPids: new Set(),
+    allPidsShown: true,
+    pidSearch: '',
     tagSearch: '',
     query: '',
     useRegex: false,
@@ -222,6 +225,8 @@ function App() {
   var _sb = useState(true); var sidebar = _sb[0], setSidebar = _sb[1];
   var _dr = useState(false); var dragOver = _dr[0], setDragOver = _dr[1];
   var fileRef = useRef(null);
+  var _expanded = useState({}); var expanded = _expanded[0], setExpanded = _expanded[1];
+  function toggleSection(key) { setExpanded(function(prev) { var next = {}; for (var k in prev) next[k] = prev[k]; next[key] = !next[key]; return next; }); }
   var _locale = useState(function() { return window.__i18n ? window.__i18n.getLocale() : 'en'; });
   var locale = _locale[0], setLocaleState = _locale[1];
   function t(key, params) { return window.__i18n ? window.__i18n.t(key, params) : key; }
@@ -272,6 +277,27 @@ function App() {
     return s;
   }, [entries]);
 
+  var pidStats = useMemo(function() {
+    var s = {};
+    entries.forEach(function(e) {
+      if (e.pid) {
+        if (!s[e.pid]) s[e.pid] = { count: 0 };
+        s[e.pid].count++;
+      }
+    });
+    return s;
+  }, [entries]);
+
+  var pidNames = useMemo(function() {
+    var names = {};
+    entries.forEach(function(e) {
+      if (e.pid && !names[e.pid] && e.tag && /^com\.|^org\.|^net\.|^io\.|^cn\./.test(e.tag)) {
+        names[e.pid] = e.tag;
+      }
+    });
+    return names;
+  }, [entries]);
+
   var visTags = useMemo(function() {
     var all = Object.keys(tagStats).sort(function(a, b) { return tagStats[b].count - tagStats[a].count; });
     var ts = tab.tagSearch || '';
@@ -281,6 +307,19 @@ function App() {
   }, [tagStats, tab.tagSearch]);
 
   var tagSearchVal = tab.tagSearch || '';
+
+  var visPids = useMemo(function() {
+    var all = Object.keys(pidStats).sort(function(a, b) { return pidStats[b].count - pidStats[a.count]; });
+    var ps = tab.pidSearch || '';
+    if (!ps) return all;
+    var q = ps.toLowerCase();
+    return all.filter(function(p) {
+      var label = pidNames[p] || '';
+      return p.indexOf(q) !== -1 || label.toLowerCase().indexOf(q) !== -1;
+    });
+  }, [pidStats, pidNames, tab.pidSearch]);
+
+  var pidSearchVal = tab.pidSearch || '';
 
   // Store search params as plain values (not RegExp object) to avoid lastIndex issues
   var searchRe = useMemo(function() {
@@ -301,6 +340,8 @@ function App() {
       if (!tab.levels.has(e.level)) return false;
       if (!tab.allTagsShown && tab.selTags.size === 0) return false;
       if (tab.selTags.size > 0 && !tab.selTags.has(e.tag)) return false;
+      if (!tab.allPidsShown && tab.selPids.size === 0) return false;
+      if (tab.selPids.size > 0 && !tab.selPids.has(e.pid)) return false;
       if (re && mode === 'hide') {
         re.lastIndex = 0;
         var inMsg = re.test(e.message);
@@ -314,7 +355,7 @@ function App() {
       }
       return true;
     });
-  }, [entries, tab.levels, tab.selTags, tab.allTagsShown, searchRe, tab.searchMode]);
+  }, [entries, tab.levels, tab.selTags, tab.allTagsShown, tab.selPids, tab.allPidsShown, searchRe, tab.searchMode]);
 
   // Indices into `filtered` where search matches (for highlight mode navigation)
   var matchIndices = useMemo(function() {
@@ -346,7 +387,7 @@ function App() {
   // Reset activeMatch when search/filter changes
   useEffect(function() {
     updateTab(activeId, { activeMatch: -1 });
-  }, [tab.query, tab.useRegex, tab.searchMode, tab.levels, tab.selTags, tab.allTagsShown]);
+  }, [tab.query, tab.useRegex, tab.searchMode, tab.levels, tab.selTags, tab.allTagsShown, tab.selPids, tab.allPidsShown]);
 
   // The index in `filtered` that corresponds to the current activeMatch
   var scrollToFilteredIdx = matchIndices.length > 0 && tab.activeMatch >= 0 && tab.activeMatch < matchIndices.length
@@ -379,6 +420,9 @@ function App() {
             levels: new Set(LEVELS),
             selTags: new Set(),
             allTagsShown: true,
+            selPids: new Set(),
+            allPidsShown: true,
+            pidSearch: '',
             tagSearch: '',
             query: '',
             useRegex: false,
@@ -469,6 +513,12 @@ function App() {
     var next = new Set(tab.selTags);
     if (next.has(tag)) next.delete(tag); else next.add(tag);
     updateTab(activeId, { selTags: next, allTagsShown: false });
+  }
+
+  function togglePid(pid) {
+    var next = new Set(tab.selPids);
+    if (next.has(pid)) next.delete(pid); else next.add(pid);
+    updateTab(activeId, { selPids: next, allPidsShown: false });
   }
 
   function doExport() {
@@ -576,6 +626,15 @@ function App() {
       );
     });
 
+    var pidList = visPids.map(function(pid) {
+      var label = pidNames[pid] ? pid + ' (' + pidNames[pid] + ')' : pid;
+      return h('label', { key: pid, className: 'tag-item' },
+        h('input', { type: 'checkbox', checked: tab.allPidsShown || tab.selPids.has(pid), onChange: function() { togglePid(pid); } }),
+        h('span', { className: 'tag-name', title: label }, label),
+        h('span', { className: 'tag-count' }, pidStats[pid].count.toLocaleString())
+      );
+    });
+
     sidebarEl = h('div', { className: 'sidebar' },
       h('div', { className: 'sidebar-section' },
         h('h3', null, t('sidebar.levels')),
@@ -587,15 +646,36 @@ function App() {
         )
       ),
       hasData ? h('div', { className: 'sidebar-section' },
-        h('h3', null, t('sidebar.tags', { n: Object.keys(tagStats).length })),
-        h('input', { className: 'tag-search', type: 'text', placeholder: t('sidebar.filterTags'), value: tagSearchVal, onChange: function(e) { updateTab(activeId, { tagSearch: e.target.value }); } }),
-        h('div', { className: 'tag-list' },
-          tagList.length ? tagList : h('div', { style: { padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' } }, t('sidebar.noMatchingTags'))
+        h('h3', { className: 'sidebar-section-toggle', onClick: function() { toggleSection('tags'); } },
+          expanded.tags ? '▼' : '▶',
+          ' ' + t('sidebar.tags', { n: Object.keys(tagStats).length })
         ),
-        h('div', { className: 'tag-actions' },
-          h('button', { className: 'tag-action-btn', onClick: function() { var allTags = Object.keys(tagStats); var allShown = tab.allTagsShown || tab.selTags.size >= allTags.length; if (allShown) { updateTab(activeId, { selTags: new Set(), allTagsShown: false }); } else { updateTab(activeId, { selTags: new Set(allTags), allTagsShown: false }); } } }, t('sidebar.selectAll')),
-          h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selTags: new Set(), allTagsShown: true }); } }, t('sidebar.showAll'))
-        )
+        expanded.tags ? h('div', null,
+          h('input', { className: 'tag-search', type: 'text', placeholder: t('sidebar.filterTags'), value: tagSearchVal, onChange: function(e) { updateTab(activeId, { tagSearch: e.target.value }); } }),
+          h('div', { className: 'tag-list' },
+            tagList.length ? tagList : h('div', { style: { padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' } }, t('sidebar.noMatchingTags'))
+          ),
+          h('div', { className: 'tag-actions' },
+            h('button', { className: 'tag-action-btn', onClick: function() { var allTags = Object.keys(tagStats); var allShown = tab.allTagsShown || tab.selTags.size >= allTags.length; if (allShown) { updateTab(activeId, { selTags: new Set(), allTagsShown: false }); } else { updateTab(activeId, { selTags: new Set(allTags), allTagsShown: false }); } } }, t('sidebar.selectAll')),
+            h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selTags: new Set(), allTagsShown: true }); } }, t('sidebar.showAll'))
+          )
+        ) : null
+      ) : null,
+      hasData && Object.keys(pidStats).length > 0 ? h('div', { className: 'sidebar-section' },
+        h('h3', { className: 'sidebar-section-toggle', onClick: function() { toggleSection('processes'); } },
+          expanded.processes ? '▼' : '▶',
+          ' ' + t('sidebar.processes', { n: Object.keys(pidStats).length })
+        ),
+        expanded.processes ? h('div', null,
+          h('input', { className: 'tag-search', type: 'text', placeholder: t('sidebar.filterProcesses'), value: pidSearchVal, onChange: function(e) { updateTab(activeId, { pidSearch: e.target.value }); } }),
+          h('div', { className: 'tag-list' },
+            pidList.length ? pidList : h('div', { style: { padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' } }, t('sidebar.noMatchingProcesses'))
+          ),
+          h('div', { className: 'tag-actions' },
+            h('button', { className: 'tag-action-btn', onClick: function() { var allPids = Object.keys(pidStats); var allShown = tab.allPidsShown || tab.selPids.size >= allPids.length; if (allShown) { updateTab(activeId, { selPids: new Set(), allPidsShown: false }); } else { updateTab(activeId, { selPids: new Set(allPids), allPidsShown: false }); } } }, t('sidebar.selectAll')),
+            h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selPids: new Set(), allPidsShown: true }); } }, t('sidebar.showAll'))
+          )
+        ) : null
       ) : null,
       h('div', { className: 'sidebar-section' },
         h('h3', null, t('sidebar.shortcuts')),
