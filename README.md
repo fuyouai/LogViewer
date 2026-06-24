@@ -2,10 +2,6 @@
 
 Android logcat 日志查看桌面应用，支持多文件标签页、实时过滤和搜索高亮。
 
-## 下载
-
-[📥 下载 v1.0.1](/releases/tag/v1.0.1)
-
 ## 功能
 
 - 支持多种 logcat 格式：threadtime、long、brief、brief+date、process、tag 等
