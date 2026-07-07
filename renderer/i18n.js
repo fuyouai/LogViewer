@@ -24,6 +24,8 @@
       'header.export': '📥 Export',
       'header.exportTooltip': 'Export',
       'header.open': '📂 Open',
+      'header.encodingTitle': 'Text encoding (change to re-read the file)',
+      'header.encodingAuto': 'Auto detect',
 
       // Tabs
       'tab.untitled': 'Untitled',
@@ -52,11 +54,13 @@
 
       // Loading
       'loading.parsing': 'Parsing logcat...',
+      'loading.detecting': 'Detecting encoding...',
       'loading.openDialog': 'Opening file dialog...',
       'loading.reading': 'Reading {name}...',
       'loading.progress': 'Loading... {pct}% ({mb} MB)',
       'loading.readingFile': 'Reading file...',
       'loading.failed': 'Failed to read file',
+      'loading.noPath': 'Cannot re-read: file path unavailable',
 
       // Drop zone
       'dropzone.text': 'Drag & drop a logcat file here',
@@ -107,6 +111,8 @@
       'header.export': '📥 导出',
       'header.exportTooltip': '导出',
       'header.open': '📂 打开',
+      'header.encodingTitle': '文本编码（切换后会重新读取文件）',
+      'header.encodingAuto': '自动识别',
 
       // Tabs
       'tab.untitled': '未命名',
@@ -135,11 +141,13 @@
 
       // Loading
       'loading.parsing': '解析日志中...',
+      'loading.detecting': '正在识别编码...',
       'loading.openDialog': '正在打开文件对话框...',
       'loading.reading': '正在读取 {name}...',
       'loading.progress': '加载中... {pct}% ({mb} MB)',
       'loading.readingFile': '正在读取文件...',
       'loading.failed': '读取文件失败',
+      'loading.noPath': '无法重新读取：文件路径不可用',
 
       // Drop zone
       'dropzone.text': '将 logcat 文件拖放到这里',

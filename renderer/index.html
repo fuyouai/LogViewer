@@ -112,6 +112,24 @@
     }
     .regex-toggle.active { background: #58a6ff22; color: var(--accent); border-color: var(--accent); }
 
+    .encoding-select {
+      background: var(--bg-input);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.15s;
+      -webkit-app-region: no-drag;
+    }
+    .encoding-select:hover { border-color: var(--accent); }
+    .encoding-select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px #58a6ff33; }
+    .encoding-select option { background: var(--bg-sidebar); color: var(--text-primary); }
+    .encoding-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .search-match-count { color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
     .search-nav { display: flex; align-items: center; gap: 2px; }
     .search-nav-btn {

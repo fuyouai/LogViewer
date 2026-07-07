@@ -71,10 +71,16 @@ var ROW_H = 20;
 var LEVELS = ['V', 'D', 'I', 'W', 'E', 'F'];
 var LEVEL_COLORS = { V: 'var(--level-V)', D: 'var(--level-D)', I: 'var(--level-I)', W: 'var(--level-W)', E: 'var(--level-E)', F: 'var(--level-F)' };
 
+var ENCODINGS = [
+  'auto', 'utf-8', 'utf-16le', 'utf-16be', 'gbk', 'gb18030', 'big5',
+  'shift_jis', 'euc-jp', 'euc-kr', 'windows-1252', 'latin1'
+];
+
 function makeTab(fileName) {
   return {
     id: newTabId(),
     fileName: fileName || '',
+    filePath: '',
     entries: [],
     levels: new Set(LEVELS),
     selTags: new Set(),
@@ -88,7 +94,9 @@ function makeTab(fileName) {
     searchMode: 'hide',    // 'hide' = hide non-matches (default), 'highlight' = show all, highlight matches
     activeMatch: -1,       // index into matchIndices, -1 = no selection
     rawText: '',
-    charCount: 0
+    charCount: 0,
+    encoding: 'auto',      // 'auto' = auto-detect, otherwise a concrete encoding label
+    buffer: null           // in-memory byte buffer (for drag-drop where no fs path exists)
   };
 }
 
@@ -403,7 +411,7 @@ function App() {
   }
 
   // ─── File Loading ───
-  function loadIntoTab(text, name, targetId) {
+  function loadIntoTab(text, name, targetId, encoding, filePath, buffer) {
     var tid = targetId || activeId;
     setProgress(t('loading.parsing'));
     setTimeout(function() {
@@ -416,6 +424,7 @@ function App() {
           return {
             id: t.id,
             fileName: name || t.fileName,
+            filePath: filePath != null ? filePath : t.filePath,
             entries: parsed,
             levels: new Set(LEVELS),
             selTags: new Set(),
@@ -429,7 +438,9 @@ function App() {
             searchMode: 'hide',
             activeMatch: -1,
             rawText: hasEntries ? '' : text,
-            charCount: text.length
+            charCount: text.length,
+            encoding: encoding || t.encoding || 'auto',
+            buffer: buffer != null ? buffer : t.buffer
           };
         });
       });
@@ -456,32 +467,121 @@ function App() {
     window.electronAPI.openFile().then(function(info) {
       if (!info) { setLoading(false); setProgress(''); return; }
       var id = openNewTab(info.name);
-      setProgress(t('loading.reading', { name: info.name }));
-      window.electronAPI.onFileProgress(function(p) {
-        if (p.total > 0) {
-          setProgress(t('loading.progress', { pct: Math.round((p.loaded / p.total) * 100), mb: (p.loaded / 1024 / 1024).toFixed(1) }));
-        }
-      });
-      return window.electronAPI.readFile(info.path).then(function(text) {
-        loadIntoTab(text, info.name, id);
-      });
+      // filePath is written into the tab inside loadIntoTab (single source of truth)
+      return readFileWithEncoding(info.path, id, 'auto', info.name);
     }).catch(function(err) {
       setLoading(false); setProgress('');
     });
   }
 
+  // Read a file with the given encoding ('auto' = detect).
+  // Writes the resolved encoding back into the tab.
+  function readFileWithEncoding(filePath, tabId, encoding, fileName) {
+    setProgress(t('loading.detecting'));
+    var detectP = encoding === 'auto' && window.electronAPI
+      ? window.electronAPI.detectEncoding(filePath)
+      : Promise.resolve({ encoding: encoding });
+
+    return detectP.then(function(det) {
+      var useEnc = encoding === 'auto' ? (det && det.encoding || 'utf-8') : encoding;
+      if (window.electronAPI) {
+        setProgress(t('loading.reading', { name: fileName || filePath }));
+        window.electronAPI.onFileProgress(function(p) {
+          if (p.total > 0) {
+            setProgress(t('loading.progress', { pct: Math.round((p.loaded / p.total) * 100), mb: (p.loaded / 1024 / 1024).toFixed(1) }));
+          }
+        });
+        return window.electronAPI.readFile(filePath, useEnc).then(function(res) {
+          loadIntoTab(res.text, fileName, tabId, res.encoding || useEnc, filePath);
+        });
+      } else {
+        // Browser fallback — FileReader always utf-8
+        return fetch(filePath).then(function(r) { return r.text(); }).then(function(text) {
+          loadIntoTab(text, fileName, tabId, 'utf-8', filePath);
+        });
+      }
+    }).catch(function(err) {
+      setLoading(false); setProgress(t('loading.failed'));
+    });
+  }
+
+  // Re-read the current tab's file with a different encoding.
+  function reloadWithEncoding(encoding) {
+    // Prefer in-memory buffer (drag-drop). Fall back to fs path.
+    if (tab.buffer) {
+      updateTab(tab.id, { encoding: encoding });
+      setLoading(true);
+      return readBufferWithEncoding(tab.buffer, tab.id, encoding, tab.fileName);
+    }
+    if (!tab.filePath) {
+      // Neither buffer nor path available (e.g. browser FileReader) — cannot re-read
+      updateTab(tab.id, { encoding: encoding });
+      setProgress(t('loading.noPath'));
+      setTimeout(function() { setProgress(''); }, 2000);
+      return;
+    }
+    // Optimistically update the dropdown so it reflects the user's choice immediately
+    updateTab(tab.id, { encoding: encoding });
+    setLoading(true);
+    readFileWithEncoding(tab.filePath, tab.id, encoding, tab.fileName);
+  }
+
+  // Read a file from an in-memory byte buffer (drag-drop path where the
+  // File object has no real fs path). Supports encoding detection + switching.
+  function readBufferWithEncoding(buffer, tabId, encoding, fileName) {
+    setProgress(t('loading.detecting'));
+    var useEnc = encoding; // resolved later in main process for 'auto'
+    if (window.electronAPI) {
+      setProgress(t('loading.reading', { name: fileName }));
+      // Report progress based on decode (approximate; full buffer already in memory)
+      return window.electronAPI.readFromBuffer(buffer, encoding).then(function(res) {
+        loadIntoTab(res.text, fileName, tabId, res.encoding || useEnc, '', buffer);
+      }).catch(function(err) {
+        setLoading(false); setProgress(t('loading.failed'));
+      });
+    } else {
+      // Browser fallback — FileReader, no encoding detection available
+      setLoading(true);
+      setProgress(t('loading.readingFile'));
+      return new Promise(function(resolve) {
+        var reader = new FileReader();
+        reader.onload = function(e) { loadIntoTab(e.target.result, fileName, tabId, 'utf-8', '', null); resolve(); };
+        reader.onerror = function() { setLoading(false); setProgress(t('loading.failed')); };
+        reader.readAsText(file);
+      });
+    }
+  }
+
   function openViaHTML(file) {
+    var realPath = file.path || file.filepath || '';
+    if (window.electronAPI && realPath) {
+      // Real fs path available (e.g. file input on some platforms) — use it.
+      setLoading(true);
+      var id = openNewTab(file.name);
+      return readFileWithEncoding(realPath, id, 'auto', file.name);
+    }
+    if (window.electronAPI) {
+      // Electron drag-drop: File.path is usually undefined, so read bytes
+      // and decode in the main process (no fs path needed).
+      setLoading(true);
+      setProgress(t('loading.readingFile'));
+      var tid = openNewTab(file.name);
+      var reader = new FileReader();
+      reader.onerror = function() { setLoading(false); setProgress(t('loading.failed')); };
+      reader.onload = function(e) {
+        var buf = e.target.result; // ArrayBuffer
+        readBufferWithEncoding(buf, tid, 'auto', file.name);
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+    // Pure browser — FileReader text, no encoding switching
     setLoading(true);
     setProgress(t('loading.readingFile'));
     var id = openNewTab(file.name);
     setTimeout(function() {
       var reader = new FileReader();
-      reader.onprogress = function(e) {
-        if (e.lengthComputable) {
-          setProgress(t('loading.progress', { pct: Math.round((e.loaded / e.total) * 100), mb: (e.loaded / 1024 / 1024).toFixed(1) }));
-        }
-      };
-      reader.onload = function(e) { loadIntoTab(e.target.result, file.name, id); };
+      reader.onload = function(e) { loadIntoTab(e.target.result, file.name, id, 'utf-8', '', null); };
       reader.onerror = function() { setLoading(false); setProgress(t('loading.failed')); };
       reader.readAsText(file);
     }, 100);
@@ -582,6 +682,14 @@ function App() {
       matchIndices.length > 0 && tab.activeMatch >= 0 ? (tab.activeMatch + 1) + '/' + matchIndices.length : t('header.matches', { n: matchIndices.length })
     ) : null,
     tab.query ? h('button', { className: 'search-mode-btn' + ((tab.searchMode || 'hide') === 'highlight' ? ' active' : ''), onClick: function() { updateTab(activeId, { searchMode: (tab.searchMode || 'hide') === 'hide' ? 'highlight' : 'hide' }); }, title: (tab.searchMode || 'hide') === 'hide' ? t('header.tooltipFilter') : t('header.tooltipShowAll') }, (tab.searchMode || 'hide') === 'hide' ? t('header.filter') : t('header.showAll')) : null,
+    (hasData || tab.filePath || tab.buffer) ? h('select', {
+      className: 'encoding-select',
+      value: tab.encoding || 'auto',
+      title: t('header.encodingTitle'),
+      onChange: function(e) { reloadWithEncoding(e.target.value); }
+    }, ENCODINGS.map(function(enc) {
+      return h('option', { key: enc, value: enc }, enc === 'auto' ? t('header.encodingAuto') : enc);
+    })) : null,
     h('div', { className: 'header-right' },
       hasData ? h('span', { className: 'stats-badge' }, h('strong', null, filtered.length.toLocaleString()), ' / ' + entries.length.toLocaleString()) : null,
       hasData ? h('button', { className: 'btn', onClick: doExport, title: t('header.exportTooltip') }, t('header.export')) : null,
