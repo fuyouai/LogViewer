@@ -18,7 +18,13 @@
       "icon": "icon",
       "fileAssociations": [
         {
-          "ext": ["log", "txt", "logcat", "out", "csv"],
+          "ext": [
+            "log",
+            "txt",
+            "logcat",
+            "out",
+            "csv"
+          ],
           "name": "Log File",
           "role": "Viewer"
         }
@@ -27,8 +33,16 @@
     "dmg": {
       "title": "LogViewer",
       "contents": [
-        { "x": 130, "y": 220 },
-        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "files": [
@@ -42,6 +56,8 @@
   },
   "dependencies": {
     "express": "^4.21.0",
+    "iconv-lite": "^0.6.3",
+    "jschardet": "^3.1.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
