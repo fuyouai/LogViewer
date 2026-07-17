@@ -32,9 +32,17 @@ Android logcat 日志查看桌面应用，支持多文件标签页、实时过�
 | `Shift+Enter` | 上一个匹配 |
 | `Esc` | 清空搜索 |
 
-## 安装与运行
+## 环境要求
 
-需要 Node.js 16+。
+- **Node.js >= 18**（推荐使用 [nvm](https://github.com/nvm-sh/nvm) 安装并管理版本，项目根目录已有 `.nvmrc`，进入目录执行 `nvm use` 即可自动切换）
+- **包管理器推荐使用 [pnpm](https://pnpm.io)**（npm 也可，但下文命令以 pnpm 为准）
+
+  首次使用 pnpm 可全局安装：
+  ```bash
+  npm install -g pnpm
+  ```
+
+## 安装与运行
 
 ```bash
 # 克隆项目
@@ -42,17 +50,22 @@ git clone https://github.com/yourname/logviewer.git
 cd logviewer
 
 # 安装依赖
-npm install
+pnpm install
 
 # 开发运行
-npm start
+pnpm dev
 ```
+
+> 说明：Electron 在安装时需要下载原生二进制，已通过 `pnpm-workspace.yaml` 放行其构建脚本。国内网络若下载缓慢，可设置 Electron 镜像后重装：
+> ```bash
+> ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ pnpm install
+> ```
 
 ## 打包
 
 ```bash
 # 默认：打包当前平台当前架构
-npm run dist
+pnpm dist
 
 # macOS Intel
 npx electron-builder --mac --x64
