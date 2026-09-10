@@ -87,6 +87,10 @@ function makeTab(fileName) {
     allTagsShown: true,
     selPids: new Set(),
     allPidsShown: true,
+    // Per-process thread filter: tidFilterActive has pid → whitelist mode via selTidsByPid[pid]
+    selTidsByPid: {},
+    tidFilterActive: new Set(),
+    expandedPids: new Set(),
     pidSearch: '',
     tagSearch: '',
     query: '',
@@ -288,9 +292,12 @@ function App() {
   var pidStats = useMemo(function() {
     var s = {};
     entries.forEach(function(e) {
-      if (e.pid) {
-        if (!s[e.pid]) s[e.pid] = { count: 0 };
-        s[e.pid].count++;
+      if (!e.pid) return;
+      if (!s[e.pid]) s[e.pid] = { count: 0, tids: {} };
+      s[e.pid].count++;
+      if (e.tid) {
+        if (!s[e.pid].tids[e.tid]) s[e.pid].tids[e.tid] = 0;
+        s[e.pid].tids[e.tid]++;
       }
     });
     return s;
@@ -317,7 +324,7 @@ function App() {
   var tagSearchVal = tab.tagSearch || '';
 
   var visPids = useMemo(function() {
-    var all = Object.keys(pidStats).sort(function(a, b) { return pidStats[b].count - pidStats[a.count]; });
+    var all = Object.keys(pidStats).sort(function(a, b) { return pidStats[b].count - pidStats[a].count; });
     var ps = tab.pidSearch || '';
     if (!ps) return all;
     var q = ps.toLowerCase();
@@ -343,6 +350,8 @@ function App() {
     if (!entries.length) return [];
     var mode = tab.searchMode || 'hide';
     var re = searchRe ? new RegExp(searchRe.source, 'gi') : null;
+    var tidActive = tab.tidFilterActive || new Set();
+    var selTidsByPid = tab.selTidsByPid || {};
     return entries.filter(function(e) {
       if (!e.level) return true;
       if (!tab.levels.has(e.level)) return false;
@@ -350,6 +359,12 @@ function App() {
       if (tab.selTags.size > 0 && !tab.selTags.has(e.tag)) return false;
       if (!tab.allPidsShown && tab.selPids.size === 0) return false;
       if (tab.selPids.size > 0 && !tab.selPids.has(e.pid)) return false;
+      // Thread filter (only when this process has an active whitelist)
+      if (e.pid && tidActive.has(e.pid)) {
+        var selTids = selTidsByPid[e.pid];
+        if (!selTids || selTids.size === 0) return false;
+        if (!e.tid || !selTids.has(e.tid)) return false;
+      }
       if (re && mode === 'hide') {
         re.lastIndex = 0;
         var inMsg = re.test(e.message);
@@ -363,7 +378,7 @@ function App() {
       }
       return true;
     });
-  }, [entries, tab.levels, tab.selTags, tab.allTagsShown, tab.selPids, tab.allPidsShown, searchRe, tab.searchMode]);
+  }, [entries, tab.levels, tab.selTags, tab.allTagsShown, tab.selPids, tab.allPidsShown, tab.tidFilterActive, tab.selTidsByPid, searchRe, tab.searchMode]);
 
   // Indices into `filtered` where search matches (for highlight mode navigation)
   var matchIndices = useMemo(function() {
@@ -395,7 +410,7 @@ function App() {
   // Reset activeMatch when search/filter changes
   useEffect(function() {
     updateTab(activeId, { activeMatch: -1 });
-  }, [tab.query, tab.useRegex, tab.searchMode, tab.levels, tab.selTags, tab.allTagsShown, tab.selPids, tab.allPidsShown]);
+  }, [tab.query, tab.useRegex, tab.searchMode, tab.levels, tab.selTags, tab.allTagsShown, tab.selPids, tab.allPidsShown, tab.tidFilterActive, tab.selTidsByPid]);
 
   // The index in `filtered` that corresponds to the current activeMatch
   var scrollToFilteredIdx = matchIndices.length > 0 && tab.activeMatch >= 0 && tab.activeMatch < matchIndices.length
@@ -431,6 +446,9 @@ function App() {
             allTagsShown: true,
             selPids: new Set(),
             allPidsShown: true,
+            selTidsByPid: {},
+            tidFilterActive: new Set(),
+            expandedPids: new Set(),
             pidSearch: '',
             tagSearch: '',
             query: '',
@@ -617,8 +635,125 @@ function App() {
 
   function togglePid(pid) {
     var next = new Set(tab.selPids);
+    var expanding = new Set(tab.expandedPids || []);
+    var tidActive = new Set(tab.tidFilterActive || []);
+    var selTidsByPid = {};
+    var prevMap = tab.selTidsByPid || {};
+    for (var p in prevMap) selTidsByPid[p] = new Set(prevMap[p]);
+
+    if (tab.allPidsShown) {
+      // Leave "all processes" mode: keep only the clicked pid
+      next = new Set([pid]);
+    } else if (next.has(pid)) {
+      next.delete(pid);
+    } else {
+      next.add(pid);
+    }
+
+    // Drop expand + thread filters for processes that are no longer selected
+    var keepExpand = new Set();
+    expanding.forEach(function(p) { if (next.has(p)) keepExpand.add(p); });
+    var keepTidActive = new Set();
+    tidActive.forEach(function(p) { if (next.has(p)) keepTidActive.add(p); });
+    Object.keys(selTidsByPid).forEach(function(p) {
+      if (!next.has(p)) delete selTidsByPid[p];
+    });
+
+    updateTab(activeId, {
+      selPids: next,
+      allPidsShown: false,
+      expandedPids: keepExpand,
+      tidFilterActive: keepTidActive,
+      selTidsByPid: selTidsByPid
+    });
+  }
+
+  function isPidChecked(pid) {
+    return tab.allPidsShown || tab.selPids.has(pid);
+  }
+
+  function togglePidExpand(pid, e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (!isPidChecked(pid)) return;
+    var tids = pidStats[pid] && pidStats[pid].tids ? Object.keys(pidStats[pid].tids) : [];
+    if (!tids.length) return;
+    var next = new Set(tab.expandedPids || []);
     if (next.has(pid)) next.delete(pid); else next.add(pid);
-    updateTab(activeId, { selPids: next, allPidsShown: false });
+    updateTab(activeId, { expandedPids: next });
+  }
+
+  function toggleTid(pid, tid) {
+    if (!isPidChecked(pid)) return;
+    var tidActive = new Set(tab.tidFilterActive || []);
+    var selTidsByPid = {};
+    var prevMap = tab.selTidsByPid || {};
+    for (var p in prevMap) selTidsByPid[p] = new Set(prevMap[p]);
+
+    if (!tidActive.has(pid)) {
+      // First click while "all threads": whitelist only this tid
+      tidActive.add(pid);
+      selTidsByPid[pid] = new Set([tid]);
+    } else {
+      var set = new Set(selTidsByPid[pid] || []);
+      if (set.has(tid)) set.delete(tid); else set.add(tid);
+      selTidsByPid[pid] = set;
+    }
+    updateTab(activeId, { tidFilterActive: tidActive, selTidsByPid: selTidsByPid });
+  }
+
+  function resetPidFilters() {
+    updateTab(activeId, {
+      selPids: new Set(),
+      allPidsShown: true,
+      expandedPids: new Set(),
+      tidFilterActive: new Set(),
+      selTidsByPid: {}
+    });
+  }
+
+  function checkAllPids() {
+    var allPids = Object.keys(pidStats);
+    var allShown = tab.allPidsShown || tab.selPids.size >= allPids.length;
+    if (allShown) {
+      updateTab(activeId, {
+        selPids: new Set(),
+        allPidsShown: false,
+        expandedPids: new Set(),
+        tidFilterActive: new Set(),
+        selTidsByPid: {}
+      });
+    } else {
+      updateTab(activeId, { selPids: new Set(allPids), allPidsShown: false });
+    }
+  }
+
+  function checkAllTids(pid) {
+    var tids = pidStats[pid] && pidStats[pid].tids ? Object.keys(pidStats[pid].tids) : [];
+    var tidActive = new Set(tab.tidFilterActive || []);
+    var selTidsByPid = {};
+    var prevMap = tab.selTidsByPid || {};
+    for (var p in prevMap) selTidsByPid[p] = new Set(prevMap[p]);
+    var active = tidActive.has(pid);
+    var selected = selTidsByPid[pid] || new Set();
+    var allChecked = !active || selected.size >= tids.length;
+    if (allChecked) {
+      tidActive.add(pid);
+      selTidsByPid[pid] = new Set();
+    } else {
+      tidActive.add(pid);
+      selTidsByPid[pid] = new Set(tids);
+    }
+    updateTab(activeId, { tidFilterActive: tidActive, selTidsByPid: selTidsByPid });
+  }
+
+  function resetTidFilter(pid) {
+    var tidActive = new Set(tab.tidFilterActive || []);
+    var selTidsByPid = {};
+    var prevMap = tab.selTidsByPid || {};
+    for (var p in prevMap) selTidsByPid[p] = new Set(prevMap[p]);
+    tidActive.delete(pid);
+    delete selTidsByPid[pid];
+    updateTab(activeId, { tidFilterActive: tidActive, selTidsByPid: selTidsByPid });
   }
 
   function doExport() {
@@ -775,10 +910,49 @@ function App() {
 
     var pidList = visPids.map(function(pid) {
       var label = pidNames[pid] ? pid + ' (' + pidNames[pid] + ')' : pid;
-      return h('label', { key: pid, className: 'tag-item' },
-        h('input', { type: 'checkbox', checked: tab.allPidsShown || tab.selPids.has(pid), onChange: function() { togglePid(pid); } }),
-        h('span', { className: 'tag-name', title: label }, label),
-        h('span', { className: 'tag-count' }, pidStats[pid].count.toLocaleString())
+      var checked = isPidChecked(pid);
+      var tidMap = (pidStats[pid] && pidStats[pid].tids) || {};
+      var tidKeys = Object.keys(tidMap).sort(function(a, b) { return tidMap[b] - tidMap[a]; });
+      var canExpand = checked && tidKeys.length > 0;
+      var isExpanded = canExpand && (tab.expandedPids || new Set()).has(pid);
+      var tidActive = (tab.tidFilterActive || new Set()).has(pid);
+      var selTids = (tab.selTidsByPid && tab.selTidsByPid[pid]) || new Set();
+
+      var tidChildren = null;
+      if (isExpanded) {
+        var tidItems = tidKeys.map(function(tid) {
+          var tidChecked = !tidActive || selTids.has(tid);
+          return h('label', { key: pid + '-' + tid, className: 'tag-item tid-item' },
+            h('input', { type: 'checkbox', checked: tidChecked, onChange: function() { toggleTid(pid, tid); } }),
+            h('span', { className: 'tag-name', title: 'TID ' + tid }, 'TID ' + tid),
+            h('span', { className: 'tag-count' }, tidMap[tid].toLocaleString())
+          );
+        });
+        tidChildren = h('div', { className: 'tid-list' },
+          tidItems,
+          h('div', { className: 'tag-actions tid-actions' },
+            h('button', { className: 'tag-action-btn', onClick: function(e) { e.preventDefault(); checkAllTids(pid); } }, t('sidebar.selectAll')),
+            h('button', { className: 'tag-action-btn', onClick: function(e) { e.preventDefault(); resetTidFilter(pid); } }, t('sidebar.showAll'))
+          )
+        );
+      }
+
+      return h('div', { key: pid, className: 'pid-block' },
+        h('div', { className: 'tag-item pid-row' },
+          h('button', {
+            type: 'button',
+            className: 'pid-expand-btn' + (canExpand ? '' : ' disabled'),
+            title: canExpand ? (isExpanded ? t('sidebar.collapseThreads') : t('sidebar.expandThreads')) : t('sidebar.expandThreadsHint'),
+            disabled: !canExpand,
+            onClick: function(e) { togglePidExpand(pid, e); }
+          }, canExpand ? (isExpanded ? '▼' : '▶') : '·'),
+          h('label', { className: 'pid-check-label' },
+            h('input', { type: 'checkbox', checked: checked, onChange: function() { togglePid(pid); } }),
+            h('span', { className: 'tag-name', title: label }, label),
+            h('span', { className: 'tag-count' }, pidStats[pid].count.toLocaleString())
+          )
+        ),
+        tidChildren
       );
     });
 
@@ -819,8 +993,8 @@ function App() {
             pidList.length ? pidList : h('div', { style: { padding: '8px 6px', fontSize: 12, color: 'var(--text-muted)' } }, t('sidebar.noMatchingProcesses'))
           ),
           h('div', { className: 'tag-actions' },
-            h('button', { className: 'tag-action-btn', onClick: function() { var allPids = Object.keys(pidStats); var allShown = tab.allPidsShown || tab.selPids.size >= allPids.length; if (allShown) { updateTab(activeId, { selPids: new Set(), allPidsShown: false }); } else { updateTab(activeId, { selPids: new Set(allPids), allPidsShown: false }); } } }, t('sidebar.selectAll')),
-            h('button', { className: 'tag-action-btn', onClick: function() { updateTab(activeId, { selPids: new Set(), allPidsShown: true }); } }, t('sidebar.showAll'))
+            h('button', { className: 'tag-action-btn', onClick: function() { checkAllPids(); } }, t('sidebar.selectAll')),
+            h('button', { className: 'tag-action-btn', onClick: function() { resetPidFilters(); } }, t('sidebar.showAll'))
           )
         ) : null
       ) : null,
