@@ -828,8 +828,12 @@ function App() {
     }
 
     window.electronAPI.onOpenFiles(openFromOS);
+    // Register listener first, then pull any files queued during cold start
+    // (Dock icon drop often fires open-file before React mounts).
     if (window.electronAPI.notifyRendererReady) {
-      window.electronAPI.notifyRendererReady();
+      window.electronAPI.notifyRendererReady().then(function(files) {
+        if (files && files.length) openFromOS(files);
+      }).catch(function() {});
     }
   }, []);
 

@@ -67,18 +67,15 @@ function queueOpenFiles(filePaths) {
 function flushPendingOpenFiles() {
   if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) return;
   if (!pendingOpenPaths.length) return;
-  if (mainWindow.webContents.isLoading()) return;
 
   const files = pendingOpenPaths.splice(0).map(fileInfoFromPath);
   mainWindow.webContents.send('app:open-files', files);
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  focusMainWindow();
 }
 
-function markRendererReady() {
-  rendererReady = true;
-  flushPendingOpenFiles();
+function takePendingOpenFiles() {
+  if (!pendingOpenPaths.length) return [];
+  return pendingOpenPaths.splice(0).map(fileInfoFromPath);
 }
 
 function focusMainWindow() {
@@ -152,11 +149,9 @@ function createWindow() {
 
   mainWindow.loadURL(`http://127.0.0.1:${PORT}/`);
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-  mainWindow.webContents.on('did-finish-load', () => {
-    // Renderer may still be mounting React; final flush also happens via
-    // app:renderer-ready from the page. This covers the common case.
-    markRendererReady();
-  });
+  // Do NOT flush pending files on did-finish-load: React may not have
+  // subscribed to app:open-files yet (common with Dock icon file drops).
+  // Cold-start files are delivered via app:renderer-ready invoke instead.
   mainWindow.on('closed', () => {
     mainWindow = null;
     rendererReady = false;
@@ -468,9 +463,12 @@ ipcMain.handle('app:getLocale', () => {
 });
 
 // Renderer signals it has subscribed to app:open-files.
+// Return any cold-start queued files via invoke (reliable); later opens use the event.
 ipcMain.handle('app:renderer-ready', () => {
-  markRendererReady();
-  return true;
+  rendererReady = true;
+  const files = takePendingOpenFiles();
+  if (files.length) focusMainWindow();
+  return files;
 });
 
 // ─── App Lifecycle ───
