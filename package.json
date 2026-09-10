@@ -1,6 +1,6 @@
 {
   "name": "logviewer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "LogViewer — Desktop application for viewing and filtering logcat logs",
   "main": "main.js",
   "scripts": {
@@ -12,23 +12,28 @@
   "build": {
     "appId": "com.logviewer.app",
     "productName": "LogViewer",
+    "fileAssociations": [
+      {
+        "ext": [
+          "log",
+          "txt",
+          "logcat",
+          "out",
+          "csv"
+        ],
+        "name": "Log File",
+        "description": "Log File",
+        "role": "Viewer"
+      }
+    ],
     "mac": {
       "target": "dmg",
       "category": "public.app.developer-tools",
-      "icon": "icon",
-      "fileAssociations": [
-        {
-          "ext": [
-            "log",
-            "txt",
-            "logcat",
-            "out",
-            "csv"
-          ],
-          "name": "Log File",
-          "role": "Viewer"
-        }
-      ]
+      "icon": "icon"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
     },
     "dmg": {
       "title": "LogViewer",

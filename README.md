@@ -4,7 +4,7 @@ Android logcat 日志查看桌面应用，支持多文件标签页、实时过�
 
 ## 下载
 
-[📥 下载 v1.0.1](https://github.com/fuyouai/LogViewer/releases/tag/1.0.1)
+[📥 下载](https://github.com/fuyouai/LogViewer/releases)
 
 ## 功能
 

@@ -659,6 +659,45 @@ function App() {
     return function() { window.removeEventListener('keydown', handler); };
   }, [activeId, matchIndices, tab.activeMatch]);
 
+  // ─── OS "Open With" / Finder double-click ───
+  var tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+
+  useEffect(function() {
+    if (!window.electronAPI || !window.electronAPI.onOpenFiles) return;
+
+    function openFromOS(files) {
+      if (!files || !files.length) return;
+      var current = tabsRef.current || [];
+
+      files.forEach(function(info, i) {
+        if (!info || !info.path) return;
+        var tid = null;
+        var reuse = false;
+        if (i === 0 && current.length === 1) {
+          var only = current[0];
+          if (!only.filePath && !only.buffer && (!only.entries || only.entries.length === 0) && !only.rawText) {
+            reuse = true;
+            tid = only.id;
+          }
+        }
+        setLoading(true);
+        if (reuse) {
+          updateTab(tid, { fileName: info.name || only.fileName });
+          setActiveId(tid);
+        } else {
+          tid = openNewTab(info.name);
+        }
+        readFileWithEncoding(info.path, tid, 'auto', info.name);
+      });
+    }
+
+    window.electronAPI.onOpenFiles(openFromOS);
+    if (window.electronAPI.notifyRendererReady) {
+      window.electronAPI.notifyRendererReady();
+    }
+  }, []);
+
   // ─── Render ───
   var renderRow = useCallback(function(entry, idx) {
     return h(LogLine, { key: entry.lineNum || idx, entry: entry, idx: idx, searchRe: searchRe, isActiveMatch: idx === scrollToFilteredIdx });

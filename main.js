@@ -9,6 +9,105 @@ const PORT = 38491;
 let mainWindow = null;
 let server = null;
 
+// Files queued from OS "Open With" / double-click before the renderer is ready.
+const pendingOpenPaths = [];
+let rendererReady = false;
+
+function isOpenableFile(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+  } catch (_) {
+    return false;
+  }
+}
+
+// Pull real file paths out of argv / second-instance commandLine.
+// Skips the executable, app entry, cwd ".", and flag-like args.
+function extractFilePaths(argv) {
+  if (!Array.isArray(argv)) return [];
+  const skip = new Set([
+    process.execPath,
+    path.resolve(__dirname),
+    path.resolve(__dirname, 'main.js'),
+    '.',
+    process.cwd()
+  ]);
+  const out = [];
+  for (const arg of argv) {
+    if (!arg || typeof arg !== 'string') continue;
+    if (arg.startsWith('-')) continue;
+    if (skip.has(arg) || skip.has(path.resolve(arg))) continue;
+    // Packaged macOS may pass the .app path; ignore directories.
+    if (!isOpenableFile(arg)) continue;
+    out.push(path.resolve(arg));
+  }
+  return out;
+}
+
+function fileInfoFromPath(filePath) {
+  const stats = fs.statSync(filePath);
+  return {
+    path: filePath,
+    name: path.basename(filePath),
+    size: stats.size
+  };
+}
+
+function queueOpenFiles(filePaths) {
+  if (!filePaths || !filePaths.length) return;
+  for (const fp of filePaths) {
+    if (!isOpenableFile(fp)) continue;
+    const resolved = path.resolve(fp);
+    if (pendingOpenPaths.indexOf(resolved) === -1) pendingOpenPaths.push(resolved);
+  }
+  flushPendingOpenFiles();
+}
+
+function flushPendingOpenFiles() {
+  if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!pendingOpenPaths.length) return;
+  if (mainWindow.webContents.isLoading()) return;
+
+  const files = pendingOpenPaths.splice(0).map(fileInfoFromPath);
+  mainWindow.webContents.send('app:open-files', files);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function markRendererReady() {
+  rendererReady = true;
+  flushPendingOpenFiles();
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+// macOS: "Open With" / Finder double-click can fire before app is ready.
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  queueOpenFiles([filePath]);
+});
+
+// Prefer a single instance so a second "Open With" reuses the running app.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine) => {
+    queueOpenFiles(extractFilePaths(commandLine));
+    focusMainWindow();
+  });
+}
+
+// Cold-start paths from argv (mainly Windows / Linux; also useful in some mac launches).
+queueOpenFiles(extractFilePaths(process.argv));
+
 function startServer() {
   return new Promise((resolve, reject) => {
     const srv = express();
@@ -35,6 +134,7 @@ function startServer() {
 }
 
 function createWindow() {
+  rendererReady = false;
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -52,6 +152,15 @@ function createWindow() {
 
   mainWindow.loadURL(`http://127.0.0.1:${PORT}/`);
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  mainWindow.webContents.on('did-finish-load', () => {
+    // Renderer may still be mounting React; final flush also happens via
+    // app:renderer-ready from the page. This covers the common case.
+    markRendererReady();
+  });
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    rendererReady = false;
+  });
 }
 
 // ─── IPC Handlers ───
@@ -358,9 +467,16 @@ ipcMain.handle('app:getLocale', () => {
   return app.getLocale();
 });
 
+// Renderer signals it has subscribed to app:open-files.
+ipcMain.handle('app:renderer-ready', () => {
+  markRendererReady();
+  return true;
+});
+
 // ─── App Lifecycle ───
 
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
   await startServer();
   createWindow();
 

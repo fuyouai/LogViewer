@@ -16,5 +16,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
     ipcRenderer._progressCallback = callback;
   },
+  // OS "Open With" / Finder double-click / second-instance file opens.
+  onOpenFiles: (callback) => {
+    if (!ipcRenderer._openFilesRegistered) {
+      ipcRenderer.on('app:open-files', (event, files) => {
+        if (ipcRenderer._openFilesCallback) ipcRenderer._openFilesCallback(files);
+      });
+      ipcRenderer._openFilesRegistered = true;
+    }
+    ipcRenderer._openFilesCallback = callback;
+  },
+  notifyRendererReady: () => ipcRenderer.invoke('app:renderer-ready'),
   getLocale: () => ipcRenderer.invoke('app:getLocale')
 });
